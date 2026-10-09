@@ -1,0 +1,7 @@
+# Written by Claude Code when it loads a mod: the API types, the MCP tools connected on
+# this machine, and a tsconfig pointing at them. Local to each machine, never shared.
+**/.claude-plugin/types/
+reactions/tsconfig.json
+
+.DS_Store
+node_modules/

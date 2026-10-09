@@ -1,0 +1,9 @@
+{
+  "name": "reactions",
+  "version": "0.3.0",
+  "description": "Реакции на сообщения, как в мессенджере: на любое сообщение Claude, не прерывая его работу; метки 👀 → ✅ и реакции Claude на твоих сообщениях",
+  "author": {
+    "name": "ohjohnnyoh"
+  },
+  "types": "./types/index.d.ts"
+}

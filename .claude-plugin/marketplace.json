@@ -1,0 +1,13 @@
+{
+  "name": "johnny-mods",
+  "owner": { "name": "ohjohnnyoh" },
+  "metadata": { "description": "Моды для Claude Code", "version": "0.3.0" },
+  "plugins": [
+    {
+      "name": "reactions",
+      "source": "./reactions",
+      "description": "Реакции на сообщения, как в мессенджере: на любое сообщение Claude, не прерывая его работу; метки 👀 → ✅ и реакции Claude на твоих сообщениях",
+      "version": "0.3.0"
+    }
+  ]
+}
