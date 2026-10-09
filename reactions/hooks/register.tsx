@@ -21,6 +21,11 @@ const EMOJIS = ['👍', '👎', '🤔', '😂', '❤️', '🔥']
 const TOOL = 'mcp__reactions__react'
 // Prompts typed by a person: in the terminal, in the desktop app, through Remote Control.
 const PERSON = new Set(['composer', 'sdk', 'bridge'])
+// The person's own words: typed, or typed while Claude worked and sent later by the queue mod.
+const isPerson = (origin: unknown) => {
+  const from = origin as { kind?: unknown; name?: unknown } | null
+  return typeof from?.kind === 'string' && (PERSON.has(from.kind) || (from.kind === 'plugin' && from.name === 'queue'))
+}
 const FRAME_MS = 70
 // A second press of the same reaction this soon after the first is the same click.
 const BOUNCE_MS = 400
@@ -74,10 +79,6 @@ const textKey = (text: string) => {
 }
 const textOf = (content: readonly Block[]) =>
   content.flatMap(block => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : []))
-const kindOf = (origin: unknown) => {
-  const kind = (origin as { kind?: unknown } | null)?.kind
-  return typeof kind === 'string' ? kind : ''
-}
 // One emoji, as the model sends it: no letters, no spaces, a few code points at most.
 const oneEmoji = (raw: unknown) => {
   if (typeof raw !== 'string') return ''
@@ -391,7 +392,9 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     if (e.tool === TOOL || e.agentId !== undefined || next.origin.plugin !== 'engine') return next(e)
     const ran = await next(e)
-    if (ran.deny !== undefined) return ran
+    // A refused call, or one the person interrupted (its result is thrown away), carries
+    // nothing: the reactions wait for the next call.
+    if (ran.deny !== undefined || next.signal.aborted) return ran
     const taken = await takePending($)
     if (taken.length === 0) return ran
     return { ...ran, context: [...(ran.context ?? []), told(taken, true)] }
@@ -402,7 +405,7 @@ export const register: Register = on => {
 
   // Between turns: the reactions go beside the person's next message.
   on('prompt.submit', async ($, e, next) => {
-    if (!PERSON.has(e.origin.kind)) return next(e)
+    if (!isPerson(e.origin)) return next(e)
     await load($)
     const key = textKey(e.text)
     const idle = e.turnId === undefined
@@ -417,7 +420,7 @@ export const register: Register = on => {
     // Claude's next tool result instead, which comes sooner.
     const taken = idle ? await takePending($) : []
     const ran = await next(taken.length ? { ...e, context: [...(e.context ?? []), told(taken, false)] } : e)
-    if (ran.drop !== undefined) {
+    if (ran.drop !== undefined || next.signal.aborted) {
       await update($, unread, list => list.filter(one => one.key !== key))
       await giveBack($, taken)
     }
@@ -469,7 +472,7 @@ export const register: Register = on => {
     const kept = await next(e)
     if (kept.deny !== undefined || e.agentId !== undefined) return kept
     const content = e.message.content as readonly Block[]
-    if (e.door === 'prompt' && e.message.type === 'user' && PERSON.has(kindOf(e.origin))) {
+    if (e.door === 'prompt' && e.message.type === 'user' && isPerson(e.origin)) {
       await stored($, e.uuid, textOf(content)[0] ?? '')
     } else if (e.message.type === 'attachment' && e.message.name === 'queued_command') {
       await absorbed($, e.uuid, textOf(content).join(' '))
@@ -482,7 +485,7 @@ export const register: Register = on => {
 
   // The person's messages: Claude's reaction and the turn's mark on the bubble's last line.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
-    if (!PERSON.has(e.props.origin.kind) || !e.props.text.trim()) return next(e)
+    if (!isPerson(e.props.origin) || !e.props.text.trim()) return next(e)
     const view = (await read($, memberOf(note, e))) ?? (await read($, memberOf(note, { requestId: textKey(e.props.text) })))
     const sparks = view?.mine && view.frame !== undefined ? (TEXT_SPARKS[view.frame] ?? '') : ''
     const line = [view?.mine ? `${view.mine}${sparks}` : '', view?.mark ?? ''].filter(Boolean).join('  ')

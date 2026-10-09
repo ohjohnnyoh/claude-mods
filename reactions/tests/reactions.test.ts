@@ -268,6 +268,31 @@ test('a message typed at the very end of a turn is marked by the turn it starts'
   expect(shown.get('u2')).toBe(`${typed}\n✅`)
 })
 
+test('a message the queue mod sends later is marked as the person\'s own', async ($, on) => {
+  const { shown, logs } = engine(on)
+  const queued = { kind: 'plugin', name: 'queue', asUser: true } as const
+  await $.prompt.submit({ text: 'из очереди', origin: queued as never, wait: false })
+  await $.session.append({
+    message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'из очереди' }] },
+    door: 'prompt',
+    origin: queued as never,
+    uuid: 'u7',
+  })
+  await $.turn.start({ text: 'из очереди', turnId: 't7' })
+  const bubble = await $.ui.mount({
+    plugin: 'reactions',
+    surface: 'desktop',
+    component: 'UserMessage',
+    props: { text: 'из очереди', origin: queued as never, isExpanded: true },
+    requestId: 'u7',
+  })
+  expect(shown.get('u7')).toBe('из очереди\n👀')
+  await finish($, 't7')
+  await bubble.redraw()
+  expect(shown.get('u7')).toBe('из очереди\n✅')
+  expect(failures(logs)).toEqual([])
+})
+
 test("a subagent's tool call and a refused one leave the reaction for Claude's next call", async ($, on) => {
   const clock = mock.clock(on)
   engine(on, { tool: e => (e.tool === 'Write' ? { deny: 'нет' } : { result: 'ok' }) })
@@ -282,6 +307,38 @@ test("a subagent's tool call and a refused one leave the reaction for Claude's n
   const ran = await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'b5' })
   expect(contextOf(ran)).toContain('🤔 на «Пишу файл.»')
   expect(contextOf(ran)).toContain('перепроверь')
+})
+
+// Stands for the person interrupting a running tool: it settles the call at once and
+// leaves the hooks beneath running on, their result thrown away.
+const interrupt = {
+  name: 'interrupt',
+  tier: 'prepend',
+  register(on: On) {
+    on('tool.call', async ($, e, next) => {
+      if (e.tool !== 'mcp__t__slow') return next(e)
+      void next(e).catch(() => undefined)
+      return { result: 'Interrupted by user' } as never
+    })
+  },
+} as const
+
+test('a reaction is not lost when the person interrupts the running tool', { plugins: [interrupt as never] }, async ($, on) => {
+  const clock = mock.clock(on)
+  engine(on, {
+    tool: async e => {
+      if (e.tool === 'mcp__t__slow') await clock.sleep(1000)
+      return { result: 'ok' }
+    },
+  })
+  const step = await reply($, 'desktop', 'm11', 'Запускаю долгую сборку.')
+  await step.press({ key: 'pick-m11-👍' })
+  await clock.advance(500)
+  const cut = await $.tool.call({ tool: 'mcp__t__slow', tool_use_id: 's1' } as never)
+  expect(contextOf(cut)).toBe('')
+  await clock.advance(1500)
+  const ran = await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'b9' })
+  expect(contextOf(ran)).toContain('👍 на «Запускаю долгую сборку.»')
 })
 
 test('a prompt that did not go in gives its reactions back', async ($, on) => {
